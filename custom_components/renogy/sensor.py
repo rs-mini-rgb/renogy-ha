@@ -119,15 +119,6 @@ KEY_LOAD_ACTIVE_POWER = "load_active_power"
 KEY_LOAD_APPARENT_POWER = "load_apparent_power"
 KEY_TEMPERATURE = "temperature"
 
-# Inverter-specific sensor keys
-KEY_AC_OUTPUT_VOLTAGE = "ac_output_voltage"
-KEY_AC_OUTPUT_CURRENT = "ac_output_current"
-KEY_AC_OUTPUT_FREQUENCY = "ac_output_frequency"
-KEY_INPUT_FREQUENCY = "input_frequency"
-KEY_LOAD_ACTIVE_POWER = "load_active_power"
-KEY_LOAD_APPARENT_POWER = "load_apparent_power"
-KEY_TEMPERATURE = "temperature"
-
 
 @dataclass(frozen=True)
 class RenogyBLESensorDescription(SensorEntityDescription):
