@@ -387,7 +387,7 @@ class RenogyActiveBluetoothCoordinator(
                     if device.device_type not in self._unsupported_device_types_logged:
                         self.logger.error("%s", error)
                         self._unsupported_device_types_logged.add(device.device_type)
-                    device.update_availability(False, error)
+                        device.update_availability(False, error)
                     self.last_update_success = False
                     return False
 
