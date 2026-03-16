@@ -260,3 +260,31 @@ def test_inverter_name_detection_updates_device_type():
     assert coordinator.device_type == "inverter"
     assert device.device_type == "inverter"
     assert device.name == "RNGRIU123456"
+
+
+def test_unsupported_device_type_skips_read_and_marks_unavailable():
+    """Ensure unsupported device types are handled without calling the BLE client."""
+    ble_module = _load_ble_module()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=MagicMock(),
+        logger=MagicMock(),
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+    coordinator._ble_client._commands = {"controller": {}}
+    coordinator._ble_client.read_device = AsyncMock()
+
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="RNGRIU123456",
+        rssi=-55,
+    )
+
+    success = asyncio.run(coordinator._read_device_data(service_info))
+
+    assert success is False
+    coordinator._ble_client.read_device.assert_not_awaited()
+    coordinator.device.update_availability.assert_called_once()
+    call_args = coordinator.device.update_availability.call_args[0]
+    assert "Unsupported device type" in str(call_args[1])

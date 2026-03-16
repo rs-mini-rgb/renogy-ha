@@ -107,6 +107,7 @@ class RenogyActiveBluetoothCoordinator(
         # Add connection lock to prevent multiple concurrent connections
         self._connection_lock = asyncio.Lock()
         self._connection_in_progress = False
+        self._unsupported_device_types_logged: set[str] = set()
 
     def _build_ble_client_for_type(self, device_type: str) -> RenogyBleClient:
         """Build a BLE client suitable for the configured device type."""
@@ -121,6 +122,15 @@ class RenogyActiveBluetoothCoordinator(
                 self.address,
             )
         return RenogyBleClient(scanner=scanner)
+
+    def _is_device_type_supported(self, device_type: str) -> bool:
+        """Return True when the renogy-ble client has commands for the device type."""
+        if device_type == DeviceType.SHUNT300.value:
+            return True
+        commands = getattr(self._ble_client, "_commands", None)
+        if isinstance(commands, dict):
+            return device_type in commands
+        return True
 
     @property
     def device_type(self) -> str:
@@ -371,6 +381,15 @@ class RenogyActiveBluetoothCoordinator(
                     device.name,
                     device.address,
                 )
+
+                if not self._is_device_type_supported(device.device_type):
+                    error = ValueError(f"Unsupported device type: {device.device_type}")
+                    if device.device_type not in self._unsupported_device_types_logged:
+                        self.logger.error("%s", error)
+                        self._unsupported_device_types_logged.add(device.device_type)
+                    device.update_availability(False, error)
+                    self.last_update_success = False
+                    return False
 
                 try:
                     read_result = await self._ble_client.read_device(device)
