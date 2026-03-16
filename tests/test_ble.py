@@ -236,3 +236,27 @@ def test_shunt_poll_keeps_last_good_data_when_library_read_fails():
     call_args = coordinator.device.update_availability.call_args[0]
     assert call_args[0] is False
     assert "history-only payload" in str(call_args[1])
+
+
+def test_inverter_name_detection_updates_device_type():
+    """Ensure RNGRIU advertisements are treated as inverter devices."""
+    ble_module = _load_ble_module()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=MagicMock(),
+        logger=MagicMock(),
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="RNGRIU123456",
+        rssi=-55,
+    )
+
+    device = coordinator._update_device_from_service_info(service_info)
+
+    assert coordinator.device_type == "inverter"
+    assert device.device_type == "inverter"
+    assert device.name == "RNGRIU123456"
