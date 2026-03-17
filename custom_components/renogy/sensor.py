@@ -1146,10 +1146,18 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity):
             self._attr_unique_id = f"{device.address}_{description.key}"
             self._attr_name = f"{device.name} {description.name}"
 
+            device_registry_name = device.name
+            if (
+                device_type == DeviceType.INVERTER.value
+                and device.parsed_data
+                and device.parsed_data.get(KEY_MODEL)
+            ):
+                device_registry_name = device.parsed_data[KEY_MODEL]
+
             # Properly set up device_info for the device registry
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, device.address)},
-                name=device.name,
+                name=device_registry_name,
                 manufacturer=ATTR_MANUFACTURER,
                 model=device_model,
                 hw_version=f"BLE Address: {device.address}",
@@ -1197,9 +1205,16 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity):
             self._attr_name = f"{self._device.name} {self.entity_description.name}"
 
             # And device_info
+            device_registry_name = self._device.name
+            if (
+                self._device_type == DeviceType.INVERTER.value
+                and self._device.parsed_data
+                and self._device.parsed_data.get(KEY_MODEL)
+            ):
+                device_registry_name = self._device.parsed_data[KEY_MODEL]
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, self._device.address)},
-                name=self._device.name,
+                name=device_registry_name,
                 manufacturer=ATTR_MANUFACTURER,
                 model=device_model,
                 hw_version=f"BLE Address: {self._device.address}",
@@ -1306,6 +1321,27 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity):
                 f"{self._device.address}_{self.entity_description.key}"
             )
             self._attr_name = f"{self._device.name} {self.entity_description.name}"
+
+        if (
+            self._device_type == DeviceType.INVERTER.value
+            and self._device
+            and self._device.parsed_data
+            and self._device.parsed_data.get(KEY_MODEL)
+        ):
+            device_registry_name = self._device.parsed_data[KEY_MODEL]
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self._device.address)},
+                name=device_registry_name,
+                manufacturer=ATTR_MANUFACTURER,
+                model=self._device.parsed_data[KEY_MODEL],
+                hw_version=f"BLE Address: {self._device.address}",
+                sw_version=self._device_type.capitalize(),
+                # Add device type as software version.
+            )
+            LOGGER.debug(
+                "Updated device registry name for inverter: %s",
+                device_registry_name,
+            )
 
         self._last_updated = datetime.now()
 
