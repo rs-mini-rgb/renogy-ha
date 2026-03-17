@@ -486,3 +486,45 @@ def test_inverter_sensor_mapping_uses_library_field_names() -> None:
     assert (
         descriptions[sensor_module.KEY_MODEL].value_fn(sample_data) == "RIV1220PU-126"
     )
+
+
+def test_shunt_temperature_2_falls_back_to_raw_words() -> None:
+    """Ensure shunt temperature uses raw_words fallback when values are missing."""
+    sensor_module = _load_sensor_module()
+
+    description = next(
+        item
+        for item in sensor_module.SHUNT300_SENSORS
+        if item.key == sensor_module.KEY_SHUNT_TEMPERATURE_2
+    )
+
+    data = {"raw_words": [0] * 38 + [1234]}
+    assert description.value_fn(data) == 1.234
+
+
+def test_shunt_estimated_energy_uses_soc() -> None:
+    """Ensure shunt estimated energy derives from SOC."""
+    sensor_module = _load_sensor_module()
+
+    description = next(
+        item
+        for item in sensor_module.SHUNT300_SENSORS
+        if item.key == sensor_module.KEY_SHUNT_ESTIMATED_ENERGY
+    )
+
+    data = {sensor_module.KEY_SHUNT_SOC: 50}
+    assert description.value_fn(data) == 0.64
+
+
+def test_inverter_load_percentage_computed_from_active_power() -> None:
+    """Ensure inverter load percentage is computed from active power."""
+    sensor_module = _load_sensor_module()
+
+    description = next(
+        item
+        for item in sensor_module.INVERTER_SENSORS
+        if item.key == sensor_module.KEY_LOAD_PERCENTAGE
+    )
+
+    data = {sensor_module.KEY_LOAD_ACTIVE_POWER: 1000}
+    assert description.value_fn(data) == 50.0
