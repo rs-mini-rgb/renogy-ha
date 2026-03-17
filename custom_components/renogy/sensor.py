@@ -293,7 +293,6 @@ SHUNT300_SENSORS: tuple[RenogyBLESensorDescription, ...] = (
         name="Shunt Estimated Energy",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: (
             round(
