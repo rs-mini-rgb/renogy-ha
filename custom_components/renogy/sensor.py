@@ -931,6 +931,122 @@ INVERTER_BATTERY_SENSORS: tuple[RenogyBLESensorDescription, ...] = (
         suggested_display_precision=1,
         value_fn=lambda data: data.get(KEY_INVERTER_BATTERY_VOLTAGE),
     ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_BATTERY_CURRENT,
+        name="Inverter Battery Current",
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get(KEY_INVERTER_BATTERY_CURRENT),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_BATTERY_SOC,
+        name="Inverter Battery SOC",
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get(KEY_INVERTER_BATTERY_SOC),
+    ),
+)
+
+INVERTER_AC_OUTPUT_SENSORS: tuple[RenogyBLESensorDescription, ...] = (
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_AC_VOLTAGE,
+        name="Inverter AC Output Voltage",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=lambda data: data.get(KEY_INVERTER_AC_VOLTAGE),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_AC_CURRENT,
+        name="Inverter AC Output Current",
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get(KEY_INVERTER_AC_CURRENT),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_AC_FREQUENCY,
+        name="Inverter AC Output Frequency",
+        native_unit_of_measurement="Hz",
+        device_class=SensorDeviceClass.FREQUENCY,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=lambda data: data.get(KEY_INVERTER_AC_FREQUENCY),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_INPUT_FREQUENCY,
+        name="Inverter AC Input Frequency",
+        native_unit_of_measurement="Hz",
+        device_class=SensorDeviceClass.FREQUENCY,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=lambda data: data.get(KEY_INVERTER_INPUT_FREQUENCY),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_LOAD_ACTIVE_POWER,
+        name="Inverter Load Active Power",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get(KEY_INVERTER_LOAD_ACTIVE_POWER),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_LOAD_APPARENT_POWER,
+        name="Inverter Load Apparent Power",
+        native_unit_of_measurement="VA",
+        device_class=SensorDeviceClass.APPARENT_POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda data: data.get(KEY_INVERTER_LOAD_APPARENT_POWER),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_LOAD_PERCENTAGE,
+        name="Inverter Load Percentage",
+        native_unit_of_measurement=PERCENTAGE,
+        device_class=SensorDeviceClass.POWER_FACTOR,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=lambda data: (
+            round((data.get(KEY_INVERTER_LOAD_ACTIVE_POWER, 0) / 2000) * 100, 1)
+            if data.get(KEY_INVERTER_LOAD_ACTIVE_POWER) is not None
+            else None
+        ),
+    ),
+)
+
+INVERTER_STATUS_SENSORS: tuple[RenogyBLESensorDescription, ...] = (
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_TEMPERATURE,
+        name="Inverter Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get(KEY_INVERTER_TEMPERATURE),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_DEVICE_ID,
+        name="Inverter Device ID",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get(KEY_INVERTER_DEVICE_ID),
+    ),
+    RenogyBLESensorDescription(
+        key=KEY_INVERTER_MODEL,
+        name="Inverter Model",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.get(KEY_INVERTER_MODEL),
+    ),
+    # Note: INVERTER_MODE (register 4408) not available in RIV1220PU's
+    # 4002-4033 register range
+    # Note: TOTAL_ENERGY (registers 4330-4331) not available in RIV1220PU's
+    # 4002-4033 register range
+)
+
+# All inverter sensors combined
+INVERTER_ALL_SENSORS = (
+    INVERTER_BATTERY_SENSORS + INVERTER_AC_OUTPUT_SENSORS + INVERTER_STATUS_SENSORS
 )
 
 INVERTER_AC_OUTPUT_SENSORS: tuple[RenogyBLESensorDescription, ...] = (
@@ -1052,11 +1168,13 @@ SENSORS_BY_DEVICE_TYPE = {
         "Statistics": DCC_STATISTICS_SENSORS,
         "Diagnostic": DCC_DIAGNOSTIC_SENSORS,
     },
-    DeviceType.INVERTER.value: {
-        "Inverter": INVERTER_ALL_SENSORS,
-    },
     DeviceType.SHUNT300.value: {
         "Shunt": SHUNT300_SENSORS,
+    },
+    DeviceType.INVERTER.value: {
+        "Battery": INVERTER_BATTERY_SENSORS,
+        "AC Output": INVERTER_AC_OUTPUT_SENSORS,
+        "Status": INVERTER_STATUS_SENSORS,
     },
 }
 
