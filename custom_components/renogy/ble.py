@@ -123,6 +123,16 @@ class RenogyActiveBluetoothCoordinator(
         self.device_type = device_type
         self.last_poll_time: datetime | None = None
         self.device_data_callback = device_data_callback
+        self.poll_attempts = 0
+        self.successful_poll_count = 0
+        self.failed_poll_count = 0
+        self.consecutive_poll_failures = 0
+        self.last_poll_started: str | None = None
+        self.last_poll_finished: str | None = None
+        self.last_successful_poll: str | None = None
+        self.last_ble_error: str | None = None
+        self.last_ble_source: str | None = None
+        self.reconnect_count = 0
         self.logger.debug(
             "Initialized coordinator for %s as %s with %ss interval (%s shunt mode)",
             address,
@@ -137,6 +147,7 @@ class RenogyActiveBluetoothCoordinator(
         self._shunt_listener_failures = 0
         self._shunt_listener_last_success = 0.0
         self._shunt_auto_fallback_active = False
+        self.connection_mode = self._resolve_connection_mode()
         self.device_alias = ""
         self._shunt_energy_client = (
             shunt_client_class() if shunt_client_class is not None else None
@@ -212,6 +223,27 @@ class RenogyActiveBluetoothCoordinator(
             )
             if shunt_client_class is not None:
                 self._ble_client = cast(RenogyBleClient, shunt_client_class())
+            self.connection_mode = self._resolve_connection_mode()
+
+    def _resolve_connection_mode(self) -> str:
+        """Return the active connection strategy for diagnostics."""
+        if self._uses_sustained_shunt_listener():
+            return "sustained"
+        return "polling"
+
+    def _record_poll_result(self, *, success: bool, error: Exception | None) -> None:
+        """Update diagnostics after a BLE poll attempt."""
+        self.last_poll_finished = datetime.now().isoformat()
+        if success:
+            self.successful_poll_count += 1
+            self.consecutive_poll_failures = 0
+            self.last_successful_poll = self.last_poll_finished
+            self.last_ble_error = None
+            return
+
+        self.failed_poll_count += 1
+        self.consecutive_poll_failures += 1
+        self.last_ble_error = str(error) if error is not None else "unknown"
 
     @property
     def device_type(self) -> str:
@@ -375,6 +407,10 @@ class RenogyActiveBluetoothCoordinator(
                 service_info.name,
             )
             self.device_type = detected_type
+            self.connection_mode = self._resolve_connection_mode()
+
+        source = getattr(service_info, "source", None)
+        self.last_ble_source = source if isinstance(source, str) else None
 
         if not self.device:
             self.logger.debug(
@@ -415,6 +451,7 @@ class RenogyActiveBluetoothCoordinator(
                     self.device_type,
                 )
                 self.device.device_type = self.device_type
+                self.connection_mode = self._resolve_connection_mode()
 
         if (
             self._uses_intermittent_shunt_reads(self.device.device_type)
@@ -426,6 +463,7 @@ class RenogyActiveBluetoothCoordinator(
                 service_info.address,
             )
             self._ble_client = cast(RenogyBleClient, shunt_client_class())
+            self.connection_mode = self._resolve_connection_mode()
         elif self._uses_sustained_shunt_listener(self.device.device_type) and (
             shunt_client_class is None
             or isinstance(self._ble_client, shunt_client_class)
@@ -437,6 +475,7 @@ class RenogyActiveBluetoothCoordinator(
             self._ble_client = RenogyBleClient(
                 scanner=bluetooth.async_get_scanner(self.hass)
             )
+            self.connection_mode = self._resolve_connection_mode()
 
         return self.device
 
@@ -589,6 +628,7 @@ class RenogyActiveBluetoothCoordinator(
                     self.device.name if self.device is not None else self.address,
                     max_attempts=3,
                 )
+                self.last_ble_error = None
 
                 def notification_handler(
                     _sender: BleakGATTCharacteristic | int | str, data: bytearray
@@ -611,6 +651,8 @@ class RenogyActiveBluetoothCoordinator(
                     self.device.update_availability(False, err)
                 self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
                 self._handle_shunt_listener_failure(err)
+                self.reconnect_count += 1
+                self.last_ble_error = str(err)
                 self.logger.debug(
                     "Smart Shunt listener error for %s: %s",
                     self.address,
@@ -639,6 +681,8 @@ class RenogyActiveBluetoothCoordinator(
                 self._connection_in_progress = True
                 success = False
                 error: Exception | None = None
+                self.poll_attempts += 1
+                self.last_poll_started = datetime.now().isoformat()
                 device = self._update_device_from_service_info(service_info)
                 self.logger.debug(
                     "Polling %s device: %s (%s)",
@@ -666,6 +710,7 @@ class RenogyActiveBluetoothCoordinator(
                 # Always update the device availability and last_update_success
                 device.update_availability(success, error)
                 self.last_update_success = success
+                self._record_poll_result(success=success, error=error)
 
                 # Update coordinator data if successful
                 if success and device.parsed_data:

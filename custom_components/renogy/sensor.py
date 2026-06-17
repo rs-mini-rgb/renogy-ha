@@ -255,6 +255,16 @@ def _resolve_device_display_name(
     return fallback
 
 
+def _coordinator_diagnostic_value(
+    coordinator: RenogyActiveBluetoothCoordinator, name: str, default: Any = None
+) -> Any:
+    """Return a diagnostic coordinator attribute without triggering mock defaults."""
+    try:
+        return vars(coordinator).get(name, default)
+    except TypeError:
+        return default
+
+
 def _normalize_shunt_energy_source(data: Dict[str, Any]) -> str:
     """Normalize shunt energy source for display."""
     energy_source = data.get(KEY_SHUNT_ENERGY_SOURCE)
@@ -1531,7 +1541,12 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
             self._attr_unique_id = (
                 f"{self._device.address}_{self.entity_description.key}"
             )
-            self._attr_name = f"{self._device.name} {self.entity_description.name}"
+            display_name = _resolve_device_display_name(
+                coordinator=self.coordinator,
+                device=self._device,
+                fallback=f"Renogy {self._device_type.capitalize()}",
+            )
+            self._attr_name = f"{display_name} {self.entity_description.name}"
 
         self._last_updated = datetime.now()
 
@@ -1642,6 +1657,39 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
             )
             attrs["critical_rssi"] = getattr(
                 self.coordinator, "critical_rssi", DEFAULT_CRITICAL_RSSI
+            )
+            attrs["connection_mode"] = _coordinator_diagnostic_value(
+                self.coordinator, "connection_mode", "unknown"
+            )
+            attrs["poll_attempts"] = _coordinator_diagnostic_value(
+                self.coordinator, "poll_attempts", 0
+            )
+            attrs["successful_poll_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "successful_poll_count", 0
+            )
+            attrs["failed_poll_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "failed_poll_count", 0
+            )
+            attrs["consecutive_poll_failures"] = _coordinator_diagnostic_value(
+                self.coordinator, "consecutive_poll_failures", 0
+            )
+            attrs["last_poll_started"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_poll_started"
+            )
+            attrs["last_poll_finished"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_poll_finished"
+            )
+            attrs["last_successful_poll"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_successful_poll"
+            )
+            attrs["last_ble_error"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_ble_error"
+            )
+            attrs["last_ble_source"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_ble_source"
+            )
+            attrs["reconnect_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "reconnect_count", 0
             )
 
         if self.entity_description.key in ENERGY_COUNTER_KEYS:
@@ -1777,6 +1825,15 @@ class RenogyAggregateHealthSensor(SensorEntity):
                 "status": status,
                 "device_type": getattr(device, "device_type", None),
                 "rssi": getattr(device, "rssi", None),
+                "connection_mode": _coordinator_diagnostic_value(
+                    coordinator, "connection_mode", "unknown"
+                ),
+                "consecutive_poll_failures": _coordinator_diagnostic_value(
+                    coordinator, "consecutive_poll_failures", 0
+                ),
+                "last_ble_error": _coordinator_diagnostic_value(
+                    coordinator, "last_ble_error"
+                ),
             }
             all_devices.append(device_summary)
 

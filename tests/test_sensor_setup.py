@@ -707,6 +707,57 @@ def test_rssi_trend_sensor_reads_coordinator_samples() -> None:
     assert entity.native_value == "improving"
 
 
+def test_health_sensor_exposes_ble_diagnostics() -> None:
+    """Ensure device health attributes include BLE diagnostic counters."""
+    sensor_module = _load_sensor_module()
+
+    coordinator = MagicMock()
+    coordinator.address = "AA:BB:CC:DD:EE:FF"
+    coordinator.device = None
+    coordinator.last_update_success = False
+    coordinator.warn_rssi = -80
+    coordinator.critical_rssi = -90
+    coordinator.connection_mode = "polling"
+    coordinator.poll_attempts = 5
+    coordinator.successful_poll_count = 3
+    coordinator.failed_poll_count = 2
+    coordinator.consecutive_poll_failures = 2
+    coordinator.last_poll_started = "2026-06-17T18:00:00"
+    coordinator.last_poll_finished = "2026-06-17T18:00:02"
+    coordinator.last_successful_poll = "2026-06-17T17:59:00"
+    coordinator.last_ble_error = "read failed"
+    coordinator.last_ble_source = "hci0"
+    coordinator.reconnect_count = 1
+
+    description = next(
+        item
+        for item in sensor_module.HEALTH_SENSORS
+        if item.key == sensor_module.KEY_HEALTH_STATUS
+    )
+
+    entity = sensor_module.RenogyBLESensor(
+        coordinator,
+        None,
+        description,
+        "Health",
+        sensor_module.DeviceType.CONTROLLER.value,
+    )
+
+    attrs = entity.extra_state_attributes
+
+    assert attrs["connection_mode"] == "polling"
+    assert attrs["poll_attempts"] == 5
+    assert attrs["successful_poll_count"] == 3
+    assert attrs["failed_poll_count"] == 2
+    assert attrs["consecutive_poll_failures"] == 2
+    assert attrs["last_poll_started"] == "2026-06-17T18:00:00"
+    assert attrs["last_poll_finished"] == "2026-06-17T18:00:02"
+    assert attrs["last_successful_poll"] == "2026-06-17T17:59:00"
+    assert attrs["last_ble_error"] == "read failed"
+    assert attrs["last_ble_source"] == "hci0"
+    assert attrs["reconnect_count"] == 1
+
+
 def test_sensor_uses_device_alias_for_display_name() -> None:
     """Ensure alias overrides BLE name for entity and device info."""
     sensor_module = _load_sensor_module()
@@ -736,3 +787,40 @@ def test_sensor_uses_device_alias_for_display_name() -> None:
 
     assert entity._attr_name.startswith("Basement Rig")
     assert entity._attr_device_info.get("name") == "Basement Rig"
+
+
+def test_sensor_uses_device_alias_after_coordinator_update() -> None:
+    """Ensure alias is preserved when the device appears after setup."""
+    sensor_module = _load_sensor_module()
+
+    coordinator = MagicMock()
+    coordinator.address = "AA:BB:CC:DD:EE:FF"
+    coordinator.device = None
+    coordinator.device_alias = "Basement Rig"
+    coordinator.last_update_success = True
+    coordinator.data = {"shunt_voltage": 13.2}
+
+    description = next(
+        item
+        for item in sensor_module.SHUNT300_SENSORS
+        if item.key == sensor_module.KEY_SHUNT_VOLTAGE
+    )
+
+    entity = sensor_module.RenogyBLESensor(
+        coordinator,
+        None,
+        description,
+        "Shunt",
+        sensor_module.DeviceType.SHUNT300.value,
+    )
+
+    device = MagicMock()
+    device.address = coordinator.address
+    device.name = "RTMShunt300A1B2"
+    device.parsed_data = {"shunt_voltage": 13.2}
+    device.is_available = True
+    coordinator.device = device
+
+    entity._handle_coordinator_update()
+
+    assert entity._attr_name == "Basement Rig Shunt Voltage"

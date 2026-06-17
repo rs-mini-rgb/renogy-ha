@@ -213,10 +213,49 @@ def test_read_device_data_handles_ble_errors():
 
     assert success is False
     assert coordinator.last_update_success is False
+    assert coordinator.poll_attempts == 1
+    assert coordinator.failed_poll_count == 1
+    assert coordinator.successful_poll_count == 0
+    assert coordinator.consecutive_poll_failures == 1
+    assert "read failed" in coordinator.last_ble_error
+    assert coordinator.last_poll_started is not None
+    assert coordinator.last_poll_finished is not None
     coordinator.device.update_availability.assert_called_once()
     call_args = coordinator.device.update_availability.call_args[0]
     assert call_args[0] is False
     assert "read failed" in str(call_args[1])
+
+
+def test_read_device_data_records_success_diagnostics():
+    """Ensure successful BLE reads reset failure diagnostics."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+    coordinator.consecutive_poll_failures = 2
+    coordinator.last_ble_error = "previous failure"
+
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="BT-TH-12345",
+        rssi=-60,
+    )
+
+    success = asyncio.run(coordinator._read_device_data(service_info))
+
+    assert success is True
+    assert coordinator.poll_attempts == 1
+    assert coordinator.successful_poll_count == 1
+    assert coordinator.failed_poll_count == 0
+    assert coordinator.consecutive_poll_failures == 0
+    assert coordinator.last_ble_error is None
+    assert coordinator.last_successful_poll is not None
 
 
 def test_sustained_shunt_device_defaults_to_generic_client():
@@ -416,6 +455,8 @@ def test_sustained_shunt_listener_error_notifies_entities():
         ble_module.asyncio.sleep = original_sleep
 
     assert coordinator.last_update_success is False
+    assert coordinator.reconnect_count == 1
+    assert "notify failed" in coordinator.last_ble_error
     coordinator.device.update_availability.assert_called_with(
         False, client.start_notify.side_effect
     )
