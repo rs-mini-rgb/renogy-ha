@@ -736,6 +736,8 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
     coordinator.last_startup_characteristic_error = (
         "Characteristic 0000fff1 was not found!"
     )
+    coordinator.stale_gatt_soft_failure_count = 3
+    coordinator.last_stale_gatt_error = "Characteristic 0000fff1 was not found!"
     coordinator.characteristic_not_found_count = 2
     coordinator.characteristic_retry_count = 2
     coordinator.characteristic_retry_success_count = 1
@@ -780,6 +782,8 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
         attrs["last_startup_characteristic_error"]
         == "Characteristic 0000fff1 was not found!"
     )
+    assert attrs["stale_gatt_soft_failure_count"] == 3
+    assert attrs["last_stale_gatt_error"] == "Characteristic 0000fff1 was not found!"
     assert attrs["characteristic_not_found_count"] == 2
     assert attrs["characteristic_retry_count"] == 2
     assert attrs["characteristic_retry_success_count"] == 1

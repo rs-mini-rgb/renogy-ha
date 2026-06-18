@@ -1715,6 +1715,12 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
             attrs["last_startup_characteristic_error"] = _coordinator_diagnostic_value(
                 self.coordinator, "last_startup_characteristic_error"
             )
+            attrs["stale_gatt_soft_failure_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "stale_gatt_soft_failure_count", 0
+            )
+            attrs["last_stale_gatt_error"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_stale_gatt_error"
+            )
             attrs["poll_attempts"] = _coordinator_diagnostic_value(
                 self.coordinator, "poll_attempts", 0
             )
@@ -1916,6 +1922,12 @@ class RenogyAggregateHealthSensor(SensorEntity):
                 ),
                 "last_startup_characteristic_error": _coordinator_diagnostic_value(
                     coordinator, "last_startup_characteristic_error"
+                ),
+                "stale_gatt_soft_failure_count": _coordinator_diagnostic_value(
+                    coordinator, "stale_gatt_soft_failure_count", 0
+                ),
+                "last_stale_gatt_error": _coordinator_diagnostic_value(
+                    coordinator, "last_stale_gatt_error"
                 ),
                 "consecutive_poll_failures": _coordinator_diagnostic_value(
                     coordinator, "consecutive_poll_failures", 0

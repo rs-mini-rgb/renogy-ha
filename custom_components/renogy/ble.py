@@ -144,6 +144,8 @@ class RenogyActiveBluetoothCoordinator(
         self.startup_refresh_skip_count = 0
         self.startup_characteristic_suppressed_count = 0
         self.last_startup_characteristic_error: str | None = None
+        self.stale_gatt_soft_failure_count = 0
+        self.last_stale_gatt_error: str | None = None
         self.ble_startup_warmup_seconds = BLE_STARTUP_WARMUP_SECONDS
         self.startup_warmup_until: str | None = (
             datetime.now() + timedelta(seconds=BLE_STARTUP_WARMUP_SECONDS)
@@ -328,6 +330,23 @@ class RenogyActiveBluetoothCoordinator(
             return False
         error_text = str(error)
         return "Characteristic" in error_text and "was not found" in error_text
+
+    def _record_characteristic_soft_failure(
+        self, device: RenogyBLEDevice, error: Exception | None
+    ) -> None:
+        """Preserve availability when BlueZ returns a stale GATT service table."""
+        self._last_read_soft_failure = True
+        self.stale_gatt_soft_failure_count += 1
+        self.last_stale_gatt_error = str(error) if error is not None else "unknown"
+        self.last_poll_finished = datetime.now().isoformat()
+        device.update_availability(True, None)
+        self.last_update_success = True
+        self.logger.warning(
+            "Treating BLE characteristic lookup failure for %s as stale GATT data; "
+            "preserving existing availability and retrying on the next poll. Error: %s",
+            device.address,
+            error,
+        )
 
     async def _read_device_once(
         self, device: RenogyBLEDevice
@@ -925,10 +944,8 @@ class RenogyActiveBluetoothCoordinator(
                     and self._is_characteristic_not_found_error(error)
                     and self._in_startup_warmup()
                 ):
-                    self._last_read_soft_failure = True
                     self.startup_characteristic_suppressed_count += 1
                     self.last_startup_characteristic_error = str(error)
-                    self.last_poll_finished = datetime.now().isoformat()
                     self.logger.warning(
                         "Suppressing startup BLE characteristic failure for %s; "
                         "preserving existing availability until warmup completes. "
@@ -936,6 +953,11 @@ class RenogyActiveBluetoothCoordinator(
                         device.address,
                         error,
                     )
+                    self._record_characteristic_soft_failure(device, error)
+                    return True
+
+                if not success and self._is_characteristic_not_found_error(error):
+                    self._record_characteristic_soft_failure(device, error)
                     return True
 
                 # Always update the device availability and last_update_success
@@ -1037,7 +1059,7 @@ class RenogyActiveBluetoothCoordinator(
         if self._last_read_soft_failure:
             self.last_update_success = True
             self.logger.info(
-                "Keeping existing data for %s after startup BLE soft failure.",
+                "Keeping existing data for %s after BLE stale-GATT soft failure.",
                 service_info.address,
             )
             return self.data if isinstance(self.data, dict) else {}

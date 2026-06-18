@@ -312,8 +312,8 @@ def test_read_device_data_retries_missing_characteristic_once():
     second_client.read_device.assert_awaited_once()
 
 
-def test_read_device_data_records_retry_failure_for_missing_characteristic():
-    """Ensure repeated missing characteristic failures remain visible."""
+def test_read_device_data_soft_fails_repeated_missing_characteristic():
+    """Ensure repeated missing characteristics preserve availability."""
     ble_module = _load_ble_module()
     hass = MagicMock()
     logger = MagicMock()
@@ -349,12 +349,17 @@ def test_read_device_data_records_retry_failure_for_missing_characteristic():
     finally:
         ble_module.asyncio.sleep = original_sleep
 
-    assert success is False
+    assert success is True
     assert coordinator.characteristic_not_found_count == 2
     assert coordinator.characteristic_retry_count == 1
     assert coordinator.characteristic_retry_success_count == 0
-    assert coordinator.failed_poll_count == 1
+    assert coordinator.failed_poll_count == 0
+    assert coordinator.consecutive_poll_failures == 0
+    assert coordinator.last_update_success is True
+    assert coordinator.stale_gatt_soft_failure_count == 1
     assert "Characteristic 0000fff1" in coordinator.last_characteristic_error
+    assert "Characteristic 0000fff1" in coordinator.last_stale_gatt_error
+    coordinator.device.update_availability.assert_called_once_with(True, None)
 
 
 def test_startup_warmup_skips_refresh_requests():
@@ -439,8 +444,9 @@ def test_startup_characteristic_failure_preserves_availability():
     assert coordinator.failed_poll_count == 0
     assert coordinator.consecutive_poll_failures == 0
     assert coordinator.startup_characteristic_suppressed_count == 1
+    assert coordinator.stale_gatt_soft_failure_count == 1
     assert "Characteristic 0000fff1" in coordinator.last_startup_characteristic_error
-    coordinator.device.update_availability.assert_not_called()
+    coordinator.device.update_availability.assert_called_once_with(True, None)
 
 
 def test_sustained_shunt_device_defaults_to_generic_client():
