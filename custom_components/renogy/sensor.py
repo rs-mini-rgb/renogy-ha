@@ -230,6 +230,19 @@ def _compute_rssi_trend(samples: list[float]) -> str:
     return "declining"
 
 
+def _coordinator_startup_warmup_active(
+    coordinator: RenogyActiveBluetoothCoordinator,
+) -> bool:
+    """Return whether a coordinator is still inside startup BLE warmup."""
+    is_active = getattr(coordinator, "_in_startup_warmup", None)
+    if not callable(is_active):
+        return False
+    try:
+        return bool(is_active())
+    except TypeError, ValueError:
+        return False
+
+
 def _coerce_float(value: Any, *, default: float | None) -> float | None:
     """Return a float value when possible, otherwise a default."""
     try:
@@ -1682,6 +1695,26 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
             attrs["connection_mode"] = _coordinator_diagnostic_value(
                 self.coordinator, "connection_mode", "unknown"
             )
+            attrs["ble_startup_warmup_active"] = _coordinator_startup_warmup_active(
+                self.coordinator
+            )
+            attrs["ble_startup_warmup_seconds"] = _coordinator_diagnostic_value(
+                self.coordinator, "ble_startup_warmup_seconds", 0
+            )
+            attrs["startup_warmup_until"] = _coordinator_diagnostic_value(
+                self.coordinator, "startup_warmup_until"
+            )
+            attrs["startup_refresh_skip_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "startup_refresh_skip_count", 0
+            )
+            attrs["startup_characteristic_suppressed_count"] = (
+                _coordinator_diagnostic_value(
+                    self.coordinator, "startup_characteristic_suppressed_count", 0
+                )
+            )
+            attrs["last_startup_characteristic_error"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_startup_characteristic_error"
+            )
             attrs["poll_attempts"] = _coordinator_diagnostic_value(
                 self.coordinator, "poll_attempts", 0
             )
@@ -1869,6 +1902,20 @@ class RenogyAggregateHealthSensor(SensorEntity):
                 "rssi": getattr(device, "rssi", None),
                 "connection_mode": _coordinator_diagnostic_value(
                     coordinator, "connection_mode", "unknown"
+                ),
+                "ble_startup_warmup_active": _coordinator_startup_warmup_active(
+                    coordinator
+                ),
+                "startup_refresh_skip_count": _coordinator_diagnostic_value(
+                    coordinator, "startup_refresh_skip_count", 0
+                ),
+                "startup_characteristic_suppressed_count": (
+                    _coordinator_diagnostic_value(
+                        coordinator, "startup_characteristic_suppressed_count", 0
+                    )
+                ),
+                "last_startup_characteristic_error": _coordinator_diagnostic_value(
+                    coordinator, "last_startup_characteristic_error"
                 ),
                 "consecutive_poll_failures": _coordinator_diagnostic_value(
                     coordinator, "consecutive_poll_failures", 0

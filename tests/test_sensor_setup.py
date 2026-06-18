@@ -728,6 +728,14 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
     coordinator.last_ble_error = "read failed"
     coordinator.last_ble_source = "hci0"
     coordinator.reconnect_count = 1
+    coordinator._in_startup_warmup = MagicMock(return_value=True)
+    coordinator.ble_startup_warmup_seconds = 180
+    coordinator.startup_warmup_until = "2026-06-17T18:03:00"
+    coordinator.startup_refresh_skip_count = 4
+    coordinator.startup_characteristic_suppressed_count = 1
+    coordinator.last_startup_characteristic_error = (
+        "Characteristic 0000fff1 was not found!"
+    )
     coordinator.characteristic_not_found_count = 2
     coordinator.characteristic_retry_count = 2
     coordinator.characteristic_retry_success_count = 1
@@ -763,6 +771,15 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
     assert attrs["last_ble_error"] == "read failed"
     assert attrs["last_ble_source"] == "hci0"
     assert attrs["reconnect_count"] == 1
+    assert attrs["ble_startup_warmup_active"] is True
+    assert attrs["ble_startup_warmup_seconds"] == 180
+    assert attrs["startup_warmup_until"] == "2026-06-17T18:03:00"
+    assert attrs["startup_refresh_skip_count"] == 4
+    assert attrs["startup_characteristic_suppressed_count"] == 1
+    assert (
+        attrs["last_startup_characteristic_error"]
+        == "Characteristic 0000fff1 was not found!"
+    )
     assert attrs["characteristic_not_found_count"] == 2
     assert attrs["characteristic_retry_count"] == 2
     assert attrs["characteristic_retry_success_count"] == 1

@@ -110,9 +110,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     else:
         LOGGER.info(
-            "Requesting initial refresh for Renogy BLE device %s", device_address
+            "Initial refresh for Renogy BLE device %s will run after coordinator "
+            "startup warmup",
+            device_address,
         )
-        hass.async_create_task(coordinator.async_request_refresh())
 
     return True
 

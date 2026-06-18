@@ -357,6 +357,92 @@ def test_read_device_data_records_retry_failure_for_missing_characteristic():
     assert "Characteristic 0000fff1" in coordinator.last_characteristic_error
 
 
+def test_startup_warmup_skips_refresh_requests():
+    """Ensure startup warmup avoids active reads while adapters settle."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    hass.loop.time = MagicMock(return_value=10.0)
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+    coordinator._startup_started_at = 0.0
+    coordinator._async_poll_device = AsyncMock()
+
+    asyncio.run(coordinator.async_request_refresh())
+
+    coordinator._async_poll_device.assert_not_awaited()
+    assert coordinator.startup_refresh_skip_count == 1
+    assert coordinator.last_update_success is True
+
+
+def test_startup_warmup_skips_advertisement_poll():
+    """Ensure advertisement-triggered polling waits for startup warmup."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    hass.loop.time = MagicMock(return_value=10.0)
+    hass.state = ble_module.CoreState.running
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+    coordinator._startup_started_at = 0.0
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="BT-TH-12345",
+        rssi=-60,
+    )
+
+    assert coordinator._needs_poll(service_info, None) is False
+    assert coordinator.startup_refresh_skip_count == 1
+
+
+def test_startup_characteristic_failure_preserves_availability():
+    """Ensure warmup characteristic misses do not mark the device unavailable."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    hass.loop.time = MagicMock(return_value=10.0)
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+    coordinator._startup_started_at = 0.0
+    error = ble_module.BleakError(
+        "Characteristic 0000fff1-0000-1000-8000-00805f9b34fb was not found!"
+    )
+    coordinator._read_device_with_characteristic_recovery = AsyncMock(
+        return_value=(False, error)
+    )
+
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="BT-TH-12345",
+        rssi=-60,
+    )
+
+    success = asyncio.run(coordinator._read_device_data(service_info))
+
+    assert success is True
+    assert coordinator.last_update_success is True
+    assert coordinator.failed_poll_count == 0
+    assert coordinator.consecutive_poll_failures == 0
+    assert coordinator.startup_characteristic_suppressed_count == 1
+    assert "Characteristic 0000fff1" in coordinator.last_startup_characteristic_error
+    coordinator.device.update_availability.assert_not_called()
+
+
 def test_sustained_shunt_device_defaults_to_generic_client():
     """Ensure sustained SHUNT300 mode avoids the library shunt read client."""
     ble_module = _load_ble_module()

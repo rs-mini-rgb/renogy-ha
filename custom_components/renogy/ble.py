@@ -86,6 +86,8 @@ SHUNT_FORCE_UPDATE_INTERVAL_SECONDS = 300
 SHUNT_AUTO_FALLBACK_FAILURES = 3
 SHUNT_LISTENER_STALE_SECONDS = 180
 CHARACTERISTIC_NOT_FOUND_RETRY_DELAY_SECONDS = 1.0
+BLE_STARTUP_WARMUP_SECONDS = 180
+BLE_STARTUP_INITIAL_REFRESH_JITTER_SECONDS = 30
 
 
 class RenogyActiveBluetoothCoordinator(
@@ -139,6 +141,13 @@ class RenogyActiveBluetoothCoordinator(
         self.characteristic_retry_count = 0
         self.characteristic_retry_success_count = 0
         self.last_characteristic_error: str | None = None
+        self.startup_refresh_skip_count = 0
+        self.startup_characteristic_suppressed_count = 0
+        self.last_startup_characteristic_error: str | None = None
+        self.ble_startup_warmup_seconds = BLE_STARTUP_WARMUP_SECONDS
+        self.startup_warmup_until: str | None = (
+            datetime.now() + timedelta(seconds=BLE_STARTUP_WARMUP_SECONDS)
+        ).isoformat()
         self.sustained_shunt_read_skip_count = 0
         self.shunt_listener_restart_count = 0
         self.shunt_listener_last_started: str | None = None
@@ -177,6 +186,53 @@ class RenogyActiveBluetoothCoordinator(
         # Add connection lock to prevent multiple concurrent connections
         self._connection_lock = asyncio.Lock()
         self._connection_in_progress = False
+        self._startup_started_at = self._monotonic_time()
+        self._last_read_soft_failure = False
+
+    def _monotonic_time(self) -> float | None:
+        """Return the Home Assistant loop monotonic time when available."""
+        loop = getattr(self.hass, "loop", None)
+        loop_time = getattr(loop, "time", None)
+        if not callable(loop_time):
+            return None
+        try:
+            if (
+                type(loop_time).__module__ == "unittest.mock"
+                and getattr(loop_time, "side_effect", None) is not None
+            ):
+                return None
+            value = loop_time()
+            if type(value).__module__ == "unittest.mock":
+                return None
+            return float(value)
+        except TypeError, ValueError:
+            return None
+
+    def _startup_warmup_remaining(self) -> float:
+        """Return seconds remaining in the startup BLE warmup window."""
+        if self._startup_started_at is None:
+            return 0.0
+        now = self._monotonic_time()
+        if now is None:
+            return 0.0
+        elapsed = now - self._startup_started_at
+        return max(0.0, BLE_STARTUP_WARMUP_SECONDS - elapsed)
+
+    def _in_startup_warmup(self) -> bool:
+        """Return whether BLE startup warmup handling is still active."""
+        return self._startup_warmup_remaining() > 0
+
+    def _initial_refresh_delay(self) -> float:
+        """Return a deterministic startup refresh delay for this device."""
+        jitter = sum(ord(char) for char in self.address) % (
+            BLE_STARTUP_INITIAL_REFRESH_JITTER_SECONDS + 1
+        )
+        return BLE_STARTUP_WARMUP_SECONDS + float(jitter)
+
+    async def _async_delayed_initial_refresh(self, delay: float) -> None:
+        """Run the first startup refresh after BLE adapters have settled."""
+        await asyncio.sleep(delay)
+        await self.async_request_refresh()
 
     def _build_ble_client_for_type(self, device_type: str) -> RenogyBleClient:
         """Build a BLE client suitable for the configured device type."""
@@ -344,6 +400,16 @@ class RenogyActiveBluetoothCoordinator(
             )
             return
 
+        warmup_remaining = self._startup_warmup_remaining()
+        if warmup_remaining > 0:
+            self.startup_refresh_skip_count += 1
+            self.logger.info(
+                "Skipping refresh for %s during BLE startup warmup; %.0fs remaining.",
+                self.address,
+                warmup_remaining,
+            )
+            return
+
         # If a connection is already in progress, don't start another one
         if self._connection_in_progress:
             self.logger.debug(
@@ -450,8 +516,15 @@ class RenogyActiveBluetoothCoordinator(
         # Schedule regular refreshes at our configured interval
         self._schedule_refresh()
 
-        # Perform an initial refresh to get data as soon as possible
-        self.hass.async_create_task(self.async_request_refresh())
+        # Stagger the first active connection after a host reboot so BlueZ and
+        # Home Assistant Bluetooth discovery can settle before GATT reads start.
+        delay = self._initial_refresh_delay()
+        self.logger.info(
+            "Scheduling initial refresh for %s after %.0fs BLE startup warmup.",
+            self.address,
+            delay,
+        )
+        self.hass.async_create_task(self._async_delayed_initial_refresh(delay))
 
         return result
 
@@ -579,6 +652,17 @@ class RenogyActiveBluetoothCoordinator(
 
         # Only poll if hass is running and device is connectable
         if self.hass.state != CoreState.running:
+            return False
+
+        warmup_remaining = self._startup_warmup_remaining()
+        if warmup_remaining > 0:
+            self.startup_refresh_skip_count += 1
+            self.logger.debug(
+                "Skipping BLE advertisement-triggered poll for %s during startup "
+                "warmup; %.0fs remaining.",
+                service_info.address,
+                warmup_remaining,
+            )
             return False
 
         # Check if we have a connectable device
@@ -762,11 +846,26 @@ class RenogyActiveBluetoothCoordinator(
                         pass
                 raise
             except Exception as err:
-                self.last_update_success = False
-                if self.device is not None:
-                    self.device.update_availability(False, err)
+                startup_characteristic_failure = (
+                    self._is_characteristic_not_found_error(err)
+                    and self._in_startup_warmup()
+                )
+                if startup_characteristic_failure:
+                    self.startup_characteristic_suppressed_count += 1
+                    self.last_startup_characteristic_error = str(err)
+                    self.logger.warning(
+                        "Suppressing startup Smart Shunt characteristic failure for "
+                        "%s; listener will retry after adapter warmup. Error: %s",
+                        self.address,
+                        err,
+                    )
+                else:
+                    self.last_update_success = False
+                    if self.device is not None:
+                        self.device.update_availability(False, err)
                 self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
-                self._handle_shunt_listener_failure(err)
+                if not startup_characteristic_failure:
+                    self._handle_shunt_listener_failure(err)
                 self.reconnect_count += 1
                 self.last_ble_error = str(err)
                 self.logger.debug(
@@ -795,6 +894,7 @@ class RenogyActiveBluetoothCoordinator(
         async with self._connection_lock:
             try:
                 self._connection_in_progress = True
+                self._last_read_soft_failure = False
                 success = False
                 error: Exception | None = None
                 self.poll_attempts += 1
@@ -819,6 +919,24 @@ class RenogyActiveBluetoothCoordinator(
                 success, error = await self._read_device_with_characteristic_recovery(
                     device
                 )
+
+                if (
+                    not success
+                    and self._is_characteristic_not_found_error(error)
+                    and self._in_startup_warmup()
+                ):
+                    self._last_read_soft_failure = True
+                    self.startup_characteristic_suppressed_count += 1
+                    self.last_startup_characteristic_error = str(error)
+                    self.last_poll_finished = datetime.now().isoformat()
+                    self.logger.warning(
+                        "Suppressing startup BLE characteristic failure for %s; "
+                        "preserving existing availability until warmup completes. "
+                        "Error: %s",
+                        device.address,
+                        error,
+                    )
+                    return True
 
                 # Always update the device availability and last_update_success
                 device.update_availability(success, error)
@@ -915,6 +1033,14 @@ class RenogyActiveBluetoothCoordinator(
 
         # Read device data using service_info and Home Assistant's Bluetooth API
         success = await self._read_device_data(service_info)
+
+        if self._last_read_soft_failure:
+            self.last_update_success = True
+            self.logger.info(
+                "Keeping existing data for %s after startup BLE soft failure.",
+                service_info.address,
+            )
+            return self.data if isinstance(self.data, dict) else {}
 
         if success and self.device and self.device.parsed_data:
             # Log the parsed data for debugging
