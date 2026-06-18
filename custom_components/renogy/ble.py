@@ -865,25 +865,31 @@ class RenogyActiveBluetoothCoordinator(
                         pass
                 raise
             except Exception as err:
-                startup_characteristic_failure = (
-                    self._is_characteristic_not_found_error(err)
-                    and self._in_startup_warmup()
-                )
-                if startup_characteristic_failure:
-                    self.startup_characteristic_suppressed_count += 1
-                    self.last_startup_characteristic_error = str(err)
-                    self.logger.warning(
-                        "Suppressing startup Smart Shunt characteristic failure for "
-                        "%s; listener will retry after adapter warmup. Error: %s",
-                        self.address,
-                        err,
-                    )
+                characteristic_failure = self._is_characteristic_not_found_error(err)
+                if characteristic_failure:
+                    if self._in_startup_warmup():
+                        self.startup_characteristic_suppressed_count += 1
+                        self.last_startup_characteristic_error = str(err)
+                        self.logger.warning(
+                            "Suppressing startup Smart Shunt characteristic failure "
+                            "for %s; listener will retry after adapter warmup. "
+                            "Error: %s",
+                            self.address,
+                            err,
+                        )
+                    if self.device is not None:
+                        self._record_characteristic_soft_failure(self.device, err)
+                    else:
+                        self._last_read_soft_failure = True
+                        self.stale_gatt_soft_failure_count += 1
+                        self.last_stale_gatt_error = str(err)
+                        self.last_update_success = True
                 else:
                     self.last_update_success = False
                     if self.device is not None:
                         self.device.update_availability(False, err)
                 self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
-                if not startup_characteristic_failure:
+                if not characteristic_failure:
                     self._handle_shunt_listener_failure(err)
                 self.reconnect_count += 1
                 self.last_ble_error = str(err)

@@ -702,6 +702,56 @@ def test_sustained_shunt_listener_error_notifies_entities():
     assert listener.call_count == 1
 
 
+def test_sustained_shunt_characteristic_failure_preserves_availability():
+    """Ensure missing shunt notify characteristics are treated as stale GATT data."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    hass.loop.call_soon_threadsafe = lambda callback: callback()
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="shunt300",
+        shunt_connection_mode="sustained",
+    )
+    listener = MagicMock()
+    coordinator.async_add_listener(listener)
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="RTMShunt300A1B2",
+        rssi=-60,
+    )
+    ble_module.bluetooth.async_last_service_info.return_value = service_info
+    error = ble_module.BleakError(
+        "Characteristic 0000c411-0000-1000-8000-00805f9b34fb was not found!"
+    )
+    client = MagicMock()
+    client.start_notify = AsyncMock(side_effect=error)
+    client.stop_notify = AsyncMock()
+    client.disconnect = AsyncMock()
+    ble_module.establish_connection = AsyncMock(return_value=client)
+    original_sleep = ble_module.asyncio.sleep
+    ble_module.asyncio.sleep = AsyncMock(side_effect=asyncio.CancelledError())
+
+    try:
+        try:
+            asyncio.run(coordinator._shunt_notification_loop())
+        except asyncio.CancelledError:
+            pass
+    finally:
+        ble_module.asyncio.sleep = original_sleep
+
+    assert coordinator.last_update_success is True
+    assert coordinator.reconnect_count == 1
+    assert coordinator.stale_gatt_soft_failure_count == 1
+    assert coordinator._shunt_listener_failures == 0
+    assert "Characteristic 0000c411" in coordinator.last_stale_gatt_error
+    coordinator.device.update_availability.assert_called_once_with(True, None)
+    assert listener.call_count == 1
+
+
 def test_sustained_shunt_listener_detects_stale_connection():
     """Ensure sustained shunt listeners become stale without valid notifications."""
     ble_module = _load_ble_module()
