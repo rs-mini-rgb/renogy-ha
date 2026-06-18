@@ -231,6 +231,15 @@ class RenogyActiveBluetoothCoordinator(
             return "sustained"
         return "polling"
 
+    def _service_info_uses_sustained_shunt_listener(
+        self, service_info: BluetoothServiceInfoBleak
+    ) -> bool:
+        """Return whether service info resolves to a sustained shunt listener."""
+        detected_type = detect_device_type_from_ble_name(
+            service_info.name, self.device_type
+        )
+        return self._uses_sustained_shunt_listener(detected_type)
+
     def _record_poll_result(self, *, success: bool, error: Exception | None) -> None:
         """Update diagnostics after a BLE poll attempt."""
         self.last_poll_finished = datetime.now().isoformat()
@@ -337,7 +346,12 @@ class RenogyActiveBluetoothCoordinator(
 
     def async_start(self) -> Callable[[], None]:
         """Start polling."""
-        self.logger.debug("Starting polling for device %s", self.address)
+        if self._uses_sustained_shunt_listener():
+            self.logger.info(
+                "Starting sustained Smart Shunt listener for device %s", self.address
+            )
+        else:
+            self.logger.debug("Starting polling for device %s", self.address)
 
         def _unsub() -> None:
             """Unsubscribe from updates."""
@@ -684,6 +698,14 @@ class RenogyActiveBluetoothCoordinator(
                 self.poll_attempts += 1
                 self.last_poll_started = datetime.now().isoformat()
                 device = self._update_device_from_service_info(service_info)
+                if self._uses_sustained_shunt_listener(device.device_type):
+                    self.logger.debug(
+                        "Skipping BLE read for sustained shunt %s; listener owns "
+                        "updates",
+                        device.address,
+                    )
+                    return True
+
                 self.logger.debug(
                     "Polling %s device: %s (%s)",
                     device.device_type,
@@ -784,7 +806,10 @@ class RenogyActiveBluetoothCoordinator(
         self, service_info: BluetoothServiceInfoBleak
     ) -> dict[str, Any]:
         """Poll the device and return parsed data."""
-        if self._uses_sustained_shunt_listener():
+        if self._uses_sustained_shunt_listener() or (
+            self._service_info_uses_sustained_shunt_listener(service_info)
+        ):
+            self.connection_mode = self._resolve_connection_mode()
             return self.data if isinstance(self.data, dict) else {}
 
         # If a connection is already in progress, don't start another one

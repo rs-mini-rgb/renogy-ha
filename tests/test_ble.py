@@ -342,6 +342,28 @@ def test_sustained_shunt_refresh_does_not_poll():
     coordinator._async_poll_device.assert_not_awaited()
 
 
+def test_detected_sustained_shunt_poll_does_not_read():
+    """Ensure BLE-detected sustained shunts do not use the polling read path."""
+    ble_module = _load_ble_module()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=MagicMock(),
+        logger=MagicMock(),
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+        shunt_connection_mode="sustained",
+    )
+    coordinator._ble_client.read_device = AsyncMock()
+    service_info = MagicMock()
+    service_info.name = "RTMShunt30046000655"
+    service_info.address = "AA:BB:CC:DD:EE:FF"
+
+    result = asyncio.run(coordinator._async_poll_device(service_info))
+
+    assert result == {}
+    coordinator._ble_client.read_device.assert_not_awaited()
+
+
 def test_sustained_shunt_notification_ignores_duplicate_payloads():
     """Ensure identical sustained shunt payloads do not spam listeners."""
     ble_module = _load_ble_module()

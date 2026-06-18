@@ -69,6 +69,14 @@ def _install_module_stubs() -> type:
         async def async_request_refresh(self) -> None:
             """Allow setup to schedule an initial refresh."""
 
+        def _uses_sustained_shunt_listener(self) -> bool:
+            """Return whether this stub coordinator is in sustained shunt mode."""
+            init = type(self).last_init or {}
+            return (
+                init.get("device_type") == "shunt300"
+                and init.get("shunt_connection_mode") == "sustained"
+            )
+
         def async_stop(self) -> None:
             """Support unload tests."""
 
@@ -125,6 +133,31 @@ def test_async_setup_entry_uses_configured_shunt_connection_mode() -> None:
     assert coordinator_class.last_init is not None
     assert coordinator_class.last_init["shunt_connection_mode"] == "intermittent"
     entry.add_update_listener.assert_called_once()
+
+
+def test_async_setup_entry_skips_initial_refresh_for_sustained_shunt() -> None:
+    """Ensure sustained Smart Shunt setup does not schedule a polling refresh."""
+    init_module, _ = _load_init_module()
+    hass = MagicMock()
+    hass.data = {}
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    hass.async_create_task = MagicMock()
+
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {
+        "address": "AA:BB:CC:DD:EE:FF",
+        init_module.CONF_DEVICE_TYPE: init_module.DeviceType.SHUNT300.value,
+        init_module.CONF_SCAN_INTERVAL: 30,
+    }
+    entry.options = {}
+    entry.add_update_listener = MagicMock(return_value=lambda: None)
+    entry.async_on_unload = MagicMock()
+
+    result = asyncio.run(init_module.async_setup_entry(hass, entry))
+
+    assert result is True
+    hass.async_create_task.assert_not_called()
 
 
 def test_reload_listener_reloads_entry() -> None:
