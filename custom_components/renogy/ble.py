@@ -84,6 +84,7 @@ LOAD_CONTROL_REGISTER = getattr(renogy_ble_module, "LOAD_CONTROL_REGISTER", 0x01
 SHUNT_RECONNECT_DELAY_SECONDS = 10
 SHUNT_FORCE_UPDATE_INTERVAL_SECONDS = 300
 SHUNT_AUTO_FALLBACK_FAILURES = 3
+SHUNT_LISTENER_STALE_SECONDS = 180
 
 
 class RenogyActiveBluetoothCoordinator(
@@ -133,6 +134,11 @@ class RenogyActiveBluetoothCoordinator(
         self.last_ble_error: str | None = None
         self.last_ble_source: str | None = None
         self.reconnect_count = 0
+        self.sustained_shunt_read_skip_count = 0
+        self.shunt_listener_restart_count = 0
+        self.shunt_listener_last_started: str | None = None
+        self.shunt_listener_last_stale_restart: str | None = None
+        self.shunt_listener_last_success: str | None = None
         self.logger.debug(
             "Initialized coordinator for %s as %s with %ss interval (%s shunt mode)",
             address,
@@ -146,6 +152,7 @@ class RenogyActiveBluetoothCoordinator(
         self._last_sustained_shunt_data: dict[str, Any] = {}
         self._shunt_listener_failures = 0
         self._shunt_listener_last_success = 0.0
+        self._shunt_listener_started_at = 0.0
         self._shunt_auto_fallback_active = False
         self.connection_mode = self._resolve_connection_mode()
         self.device_alias = ""
@@ -612,9 +619,22 @@ class RenogyActiveBluetoothCoordinator(
         current_data.update(parsed_data)
         self.data = current_data
         self.last_update_success = True
+        self.shunt_listener_last_success = datetime.now().isoformat()
         self._last_sustained_shunt_data = dict(parsed_data)
         self._last_sustained_shunt_push = now
         self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
+
+    def _sustained_shunt_listener_is_stale(self, now: float) -> bool:
+        """Return whether the sustained shunt listener has stopped receiving data."""
+        if not self._uses_sustained_shunt_listener():
+            return False
+
+        last_success = self._shunt_listener_last_success
+        if last_success:
+            age = now - last_success
+        else:
+            age = now - self._shunt_listener_started_at
+        return age >= SHUNT_LISTENER_STALE_SECONDS
 
     async def _shunt_notification_loop(self) -> None:
         """Maintain a sustained notification listener for Smart Shunt devices."""
@@ -643,6 +663,8 @@ class RenogyActiveBluetoothCoordinator(
                     max_attempts=3,
                 )
                 self.last_ble_error = None
+                self._shunt_listener_started_at = self.hass.loop.time()
+                self.shunt_listener_last_started = datetime.now().isoformat()
 
                 def notification_handler(
                     _sender: BleakGATTCharacteristic | int | str, data: bytearray
@@ -652,6 +674,24 @@ class RenogyActiveBluetoothCoordinator(
                 await client.start_notify(shunt_notify_char_uuid, notification_handler)
                 while getattr(client, "is_connected", True):
                     await asyncio.sleep(5)
+                    now = self.hass.loop.time()
+                    if self._sustained_shunt_listener_is_stale(now):
+                        self.shunt_listener_restart_count += 1
+                        self.reconnect_count += 1
+                        self.shunt_listener_last_stale_restart = (
+                            datetime.now().isoformat()
+                        )
+                        self.last_ble_error = (
+                            "Smart Shunt listener stale; restarting connection"
+                        )
+                        self.logger.warning(
+                            "Smart Shunt listener for %s has not received valid data "
+                            "for %ss; restarting connection.",
+                            self.address,
+                            SHUNT_LISTENER_STALE_SECONDS,
+                        )
+                        self.hass.loop.call_soon_threadsafe(self.async_update_listeners)
+                        break
             except asyncio.CancelledError:
                 if client is not None:
                     try:
@@ -699,6 +739,7 @@ class RenogyActiveBluetoothCoordinator(
                 self.last_poll_started = datetime.now().isoformat()
                 device = self._update_device_from_service_info(service_info)
                 if self._uses_sustained_shunt_listener(device.device_type):
+                    self.sustained_shunt_read_skip_count += 1
                     self.logger.debug(
                         "Skipping BLE read for sustained shunt %s; listener owns "
                         "updates",

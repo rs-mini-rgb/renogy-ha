@@ -1643,6 +1643,27 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
                 )
                 if last_success:
                     attrs["shunt_listener_last_success"] = last_success
+                attrs["shunt_listener_last_success_iso"] = (
+                    _coordinator_diagnostic_value(
+                        coordinator, "shunt_listener_last_success"
+                    )
+                )
+                attrs["shunt_listener_last_started"] = _coordinator_diagnostic_value(
+                    coordinator, "shunt_listener_last_started"
+                )
+                attrs["shunt_listener_restart_count"] = _coordinator_diagnostic_value(
+                    coordinator, "shunt_listener_restart_count", 0
+                )
+                attrs["shunt_listener_last_stale_restart"] = (
+                    _coordinator_diagnostic_value(
+                        coordinator, "shunt_listener_last_stale_restart"
+                    )
+                )
+                attrs["sustained_shunt_read_skip_count"] = (
+                    _coordinator_diagnostic_value(
+                        coordinator, "sustained_shunt_read_skip_count", 0
+                    )
+                )
                 auto_fallback = getattr(
                     coordinator, "_shunt_auto_fallback_active", False
                 )
@@ -1690,6 +1711,15 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
             )
             attrs["reconnect_count"] = _coordinator_diagnostic_value(
                 self.coordinator, "reconnect_count", 0
+            )
+            attrs["shunt_listener_restart_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "shunt_listener_restart_count", 0
+            )
+            attrs["shunt_listener_last_stale_restart"] = _coordinator_diagnostic_value(
+                self.coordinator, "shunt_listener_last_stale_restart"
+            )
+            attrs["sustained_shunt_read_skip_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "sustained_shunt_read_skip_count", 0
             )
 
         if self.entity_description.key in ENERGY_COUNTER_KEYS:
@@ -1833,6 +1863,15 @@ class RenogyAggregateHealthSensor(SensorEntity):
                 ),
                 "last_ble_error": _coordinator_diagnostic_value(
                     coordinator, "last_ble_error"
+                ),
+                "shunt_listener_restart_count": _coordinator_diagnostic_value(
+                    coordinator, "shunt_listener_restart_count", 0
+                ),
+                "shunt_listener_last_stale_restart": _coordinator_diagnostic_value(
+                    coordinator, "shunt_listener_last_stale_restart"
+                ),
+                "sustained_shunt_read_skip_count": _coordinator_diagnostic_value(
+                    coordinator, "sustained_shunt_read_skip_count", 0
                 ),
             }
             all_devices.append(device_summary)

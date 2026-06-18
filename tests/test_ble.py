@@ -362,6 +362,32 @@ def test_detected_sustained_shunt_poll_does_not_read():
 
     assert result == {}
     coordinator._ble_client.read_device.assert_not_awaited()
+    assert coordinator.sustained_shunt_read_skip_count == 0
+
+
+def test_sustained_shunt_read_guard_records_skip():
+    """Ensure direct sustained shunt reads are skipped and counted."""
+    ble_module = _load_ble_module()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=MagicMock(),
+        logger=MagicMock(),
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="shunt300",
+        shunt_connection_mode="sustained",
+    )
+    coordinator._ble_client.read_device = AsyncMock()
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="RTMShunt300A1B2",
+        rssi=-60,
+    )
+
+    result = asyncio.run(coordinator._read_device_data(service_info))
+
+    assert result is True
+    coordinator._ble_client.read_device.assert_not_awaited()
+    assert coordinator.sustained_shunt_read_skip_count == 1
 
 
 def test_sustained_shunt_notification_ignores_duplicate_payloads():
@@ -482,6 +508,71 @@ def test_sustained_shunt_listener_error_notifies_entities():
     coordinator.device.update_availability.assert_called_with(
         False, client.start_notify.side_effect
     )
+    assert listener.call_count == 1
+
+
+def test_sustained_shunt_listener_detects_stale_connection():
+    """Ensure sustained shunt listeners become stale without valid notifications."""
+    ble_module = _load_ble_module()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=MagicMock(),
+        logger=MagicMock(),
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="shunt300",
+        shunt_connection_mode="sustained",
+    )
+    coordinator._shunt_listener_started_at = 100.0
+
+    assert coordinator._sustained_shunt_listener_is_stale(279.0) is False
+    assert coordinator._sustained_shunt_listener_is_stale(280.0) is True
+
+
+def test_sustained_shunt_listener_restarts_when_stale():
+    """Ensure stale sustained shunt listeners restart the BLE connection."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    hass.loop.time = MagicMock(side_effect=[100.0, 280.0])
+    hass.loop.call_soon_threadsafe = lambda callback: callback()
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="shunt300",
+        shunt_connection_mode="sustained",
+    )
+    listener = MagicMock()
+    coordinator.async_add_listener(listener)
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="RTMShunt300A1B2",
+        rssi=-60,
+    )
+    ble_module.bluetooth.async_last_service_info.return_value = service_info
+    client = MagicMock()
+    client.is_connected = True
+    client.start_notify = AsyncMock()
+    client.stop_notify = AsyncMock()
+    client.disconnect = AsyncMock()
+    ble_module.establish_connection = AsyncMock(return_value=client)
+    original_sleep = ble_module.asyncio.sleep
+    ble_module.asyncio.sleep = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+
+    try:
+        try:
+            asyncio.run(coordinator._shunt_notification_loop())
+        except asyncio.CancelledError:
+            pass
+    finally:
+        ble_module.asyncio.sleep = original_sleep
+
+    assert coordinator.shunt_listener_restart_count == 1
+    assert coordinator.reconnect_count == 1
+    assert coordinator.shunt_listener_last_stale_restart is not None
+    assert "listener stale" in coordinator.last_ble_error
+    client.disconnect.assert_awaited()
     assert listener.call_count == 1
 
 
