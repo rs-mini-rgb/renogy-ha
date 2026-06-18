@@ -728,6 +728,10 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
     coordinator.last_ble_error = "read failed"
     coordinator.last_ble_source = "hci0"
     coordinator.reconnect_count = 1
+    coordinator.characteristic_not_found_count = 2
+    coordinator.characteristic_retry_count = 2
+    coordinator.characteristic_retry_success_count = 1
+    coordinator.last_characteristic_error = "Characteristic 0000fff1 was not found!"
     coordinator.shunt_listener_restart_count = 2
     coordinator.shunt_listener_last_stale_restart = "2026-06-17T18:05:00"
     coordinator.sustained_shunt_read_skip_count = 4
@@ -759,6 +763,12 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
     assert attrs["last_ble_error"] == "read failed"
     assert attrs["last_ble_source"] == "hci0"
     assert attrs["reconnect_count"] == 1
+    assert attrs["characteristic_not_found_count"] == 2
+    assert attrs["characteristic_retry_count"] == 2
+    assert attrs["characteristic_retry_success_count"] == 1
+    assert (
+        attrs["last_characteristic_error"] == "Characteristic 0000fff1 was not found!"
+    )
     assert attrs["shunt_listener_restart_count"] == 2
     assert attrs["shunt_listener_last_stale_restart"] == "2026-06-17T18:05:00"
     assert attrs["sustained_shunt_read_skip_count"] == 4

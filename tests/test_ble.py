@@ -258,6 +258,105 @@ def test_read_device_data_records_success_diagnostics():
     assert coordinator.last_successful_poll is not None
 
 
+def test_read_device_data_retries_missing_characteristic_once():
+    """Ensure missing GATT characteristic errors rebuild the client and retry once."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="BT-TH-12345",
+        rssi=-60,
+    )
+
+    first_client = coordinator._ble_client
+    first_client.read_device = AsyncMock(
+        return_value=ble_module.renogy_ble_ble.RenogyBleReadResult(
+            False,
+            {},
+            ble_module.BleakError(
+                "Characteristic 0000fff1-0000-1000-8000-00805f9b34fb was not found!"
+            ),
+        )
+    )
+    second_client = ble_module.RenogyBleClient(scanner=MagicMock())
+    second_client.read_device = AsyncMock(
+        return_value=ble_module.renogy_ble_ble.RenogyBleReadResult(True, {}, None)
+    )
+    coordinator._build_ble_client_for_type = MagicMock(return_value=second_client)
+    original_sleep = ble_module.asyncio.sleep
+    ble_module.asyncio.sleep = AsyncMock()
+
+    try:
+        success = asyncio.run(coordinator._read_device_data(service_info))
+    finally:
+        ble_module.asyncio.sleep = original_sleep
+
+    assert success is True
+    assert coordinator.characteristic_not_found_count == 1
+    assert coordinator.characteristic_retry_count == 1
+    assert coordinator.characteristic_retry_success_count == 1
+    assert coordinator.reconnect_count == 1
+    assert coordinator.last_characteristic_error is None
+    assert coordinator.successful_poll_count == 1
+    assert coordinator.failed_poll_count == 0
+    first_client.read_device.assert_awaited_once()
+    second_client.read_device.assert_awaited_once()
+
+
+def test_read_device_data_records_retry_failure_for_missing_characteristic():
+    """Ensure repeated missing characteristic failures remain visible."""
+    ble_module = _load_ble_module()
+    hass = MagicMock()
+    logger = MagicMock()
+    coordinator = ble_module.RenogyActiveBluetoothCoordinator(
+        hass=hass,
+        logger=logger,
+        address="AA:BB:CC:DD:EE:FF",
+        scan_interval=30,
+        device_type="controller",
+    )
+
+    service_info = ble_module.BluetoothServiceInfoBleak(
+        address="AA:BB:CC:DD:EE:FF",
+        name="BT-TH-12345",
+        rssi=-60,
+    )
+    error = ble_module.BleakError(
+        "Characteristic 0000fff1-0000-1000-8000-00805f9b34fb was not found!"
+    )
+    coordinator._ble_client.read_device = AsyncMock(
+        return_value=ble_module.renogy_ble_ble.RenogyBleReadResult(False, {}, error)
+    )
+    retry_client = ble_module.RenogyBleClient(scanner=MagicMock())
+    retry_client.read_device = AsyncMock(
+        return_value=ble_module.renogy_ble_ble.RenogyBleReadResult(False, {}, error)
+    )
+    coordinator._build_ble_client_for_type = MagicMock(return_value=retry_client)
+    original_sleep = ble_module.asyncio.sleep
+    ble_module.asyncio.sleep = AsyncMock()
+
+    try:
+        success = asyncio.run(coordinator._read_device_data(service_info))
+    finally:
+        ble_module.asyncio.sleep = original_sleep
+
+    assert success is False
+    assert coordinator.characteristic_not_found_count == 2
+    assert coordinator.characteristic_retry_count == 1
+    assert coordinator.characteristic_retry_success_count == 0
+    assert coordinator.failed_poll_count == 1
+    assert "Characteristic 0000fff1" in coordinator.last_characteristic_error
+
+
 def test_sustained_shunt_device_defaults_to_generic_client():
     """Ensure sustained SHUNT300 mode avoids the library shunt read client."""
     ble_module = _load_ble_module()

@@ -1712,6 +1712,18 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
             attrs["reconnect_count"] = _coordinator_diagnostic_value(
                 self.coordinator, "reconnect_count", 0
             )
+            attrs["characteristic_not_found_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "characteristic_not_found_count", 0
+            )
+            attrs["characteristic_retry_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "characteristic_retry_count", 0
+            )
+            attrs["characteristic_retry_success_count"] = _coordinator_diagnostic_value(
+                self.coordinator, "characteristic_retry_success_count", 0
+            )
+            attrs["last_characteristic_error"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_characteristic_error"
+            )
             attrs["shunt_listener_restart_count"] = _coordinator_diagnostic_value(
                 self.coordinator, "shunt_listener_restart_count", 0
             )
@@ -1863,6 +1875,18 @@ class RenogyAggregateHealthSensor(SensorEntity):
                 ),
                 "last_ble_error": _coordinator_diagnostic_value(
                     coordinator, "last_ble_error"
+                ),
+                "characteristic_not_found_count": _coordinator_diagnostic_value(
+                    coordinator, "characteristic_not_found_count", 0
+                ),
+                "characteristic_retry_count": _coordinator_diagnostic_value(
+                    coordinator, "characteristic_retry_count", 0
+                ),
+                "characteristic_retry_success_count": _coordinator_diagnostic_value(
+                    coordinator, "characteristic_retry_success_count", 0
+                ),
+                "last_characteristic_error": _coordinator_diagnostic_value(
+                    coordinator, "last_characteristic_error"
                 ),
                 "shunt_listener_restart_count": _coordinator_diagnostic_value(
                     coordinator, "shunt_listener_restart_count", 0

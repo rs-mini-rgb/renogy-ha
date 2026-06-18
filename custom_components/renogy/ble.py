@@ -85,6 +85,7 @@ SHUNT_RECONNECT_DELAY_SECONDS = 10
 SHUNT_FORCE_UPDATE_INTERVAL_SECONDS = 300
 SHUNT_AUTO_FALLBACK_FAILURES = 3
 SHUNT_LISTENER_STALE_SECONDS = 180
+CHARACTERISTIC_NOT_FOUND_RETRY_DELAY_SECONDS = 1.0
 
 
 class RenogyActiveBluetoothCoordinator(
@@ -134,6 +135,10 @@ class RenogyActiveBluetoothCoordinator(
         self.last_ble_error: str | None = None
         self.last_ble_source: str | None = None
         self.reconnect_count = 0
+        self.characteristic_not_found_count = 0
+        self.characteristic_retry_count = 0
+        self.characteristic_retry_success_count = 0
+        self.last_characteristic_error: str | None = None
         self.sustained_shunt_read_skip_count = 0
         self.shunt_listener_restart_count = 0
         self.shunt_listener_last_started: str | None = None
@@ -260,6 +265,63 @@ class RenogyActiveBluetoothCoordinator(
         self.failed_poll_count += 1
         self.consecutive_poll_failures += 1
         self.last_ble_error = str(error) if error is not None else "unknown"
+
+    def _is_characteristic_not_found_error(self, error: Exception | None) -> bool:
+        """Return True when a BLE read failed during GATT characteristic lookup."""
+        if error is None:
+            return False
+        error_text = str(error)
+        return "Characteristic" in error_text and "was not found" in error_text
+
+    async def _read_device_once(
+        self, device: RenogyBLEDevice
+    ) -> tuple[bool, Exception | None]:
+        """Read a device once and normalize library exceptions into a result."""
+        try:
+            read_result = await self._ble_client.read_device(device)
+        except (BleakError, asyncio.TimeoutError) as err:
+            self.logger.debug(
+                "BLE read failed for %s: %s",
+                device.address,
+                err,
+            )
+            return False, err
+
+        error = read_result.error
+        if error is not None and not isinstance(error, Exception):
+            error = Exception(str(error))
+        return read_result.success, error
+
+    async def _read_device_with_characteristic_recovery(
+        self, device: RenogyBLEDevice
+    ) -> tuple[bool, Exception | None]:
+        """Retry once after a missing characteristic by rebuilding the BLE client."""
+        success, error = await self._read_device_once(device)
+        if success or not self._is_characteristic_not_found_error(error):
+            return success, error
+
+        self.characteristic_not_found_count += 1
+        self.characteristic_retry_count += 1
+        self.last_characteristic_error = str(error)
+        self.logger.warning(
+            "BLE characteristic lookup failed for %s; rebuilding client and retrying "
+            "once. Error: %s",
+            device.address,
+            error,
+        )
+        self._ble_client = self._build_ble_client_for_type(device.device_type)
+        self.reconnect_count += 1
+        await asyncio.sleep(CHARACTERISTIC_NOT_FOUND_RETRY_DELAY_SECONDS)
+
+        retry_success, retry_error = await self._read_device_once(device)
+        if retry_success:
+            self.characteristic_retry_success_count += 1
+            self.last_characteristic_error = None
+        elif self._is_characteristic_not_found_error(retry_error):
+            self.characteristic_not_found_count += 1
+            self.last_characteristic_error = str(retry_error)
+
+        return retry_success, retry_error
 
     @property
     def device_type(self) -> str:
@@ -754,21 +816,9 @@ class RenogyActiveBluetoothCoordinator(
                     device.address,
                 )
 
-                try:
-                    read_result = await self._ble_client.read_device(device)
-                except (BleakError, asyncio.TimeoutError) as err:
-                    success = False
-                    error = err
-                    self.logger.debug(
-                        "BLE read failed for %s: %s",
-                        device.address,
-                        err,
-                    )
-                else:
-                    success = read_result.success
-                    error = read_result.error
-                    if error is not None and not isinstance(error, Exception):
-                        error = Exception(str(error))
+                success, error = await self._read_device_with_characteristic_recovery(
+                    device
+                )
 
                 # Always update the device availability and last_update_success
                 device.update_availability(success, error)
