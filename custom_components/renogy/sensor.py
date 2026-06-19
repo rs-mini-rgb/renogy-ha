@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from homeassistant.components.bluetooth.passive_update_coordinator import (
@@ -163,6 +163,7 @@ ENERGY_COUNTER_KEYS = {
     KEY_TOTAL_CHARGING_AH,
     KEY_TOTAL_OPERATING_DAYS,
 }
+STALE_GATT_RECOVERING_SECONDS = 180
 
 
 def _shunt_word_value(
@@ -182,6 +183,9 @@ def _compute_health_status(
     """Compute overall device health status."""
     if not coordinator.last_update_success:
         return "disconnected"
+
+    if _coordinator_stale_gatt_recovering(coordinator):
+        return "recovering"
 
     if device and hasattr(device, "is_available") and not device.is_available:
         return "disconnected"
@@ -214,6 +218,22 @@ def _compute_health_status(
         return "warn"
 
     return "healthy"
+
+
+def _coordinator_stale_gatt_recovering(
+    coordinator: RenogyActiveBluetoothCoordinator,
+) -> bool:
+    """Return whether a recent stale-GATT soft failure is still recovering."""
+    last_stale = _coordinator_diagnostic_value(coordinator, "last_stale_gatt_at")
+    if not isinstance(last_stale, str) or not last_stale:
+        return False
+
+    try:
+        last_dt = datetime.fromisoformat(last_stale)
+    except ValueError:
+        return False
+
+    return datetime.now() - last_dt <= timedelta(seconds=STALE_GATT_RECOVERING_SECONDS)
 
 
 def _compute_rssi_trend(samples: list[float]) -> str:
@@ -1718,6 +1738,9 @@ class RenogyBLESensor(PassiveBluetoothCoordinatorEntity, SensorEntity, RestoreEn
             attrs["stale_gatt_soft_failure_count"] = _coordinator_diagnostic_value(
                 self.coordinator, "stale_gatt_soft_failure_count", 0
             )
+            attrs["last_stale_gatt_at"] = _coordinator_diagnostic_value(
+                self.coordinator, "last_stale_gatt_at"
+            )
             attrs["last_stale_gatt_error"] = _coordinator_diagnostic_value(
                 self.coordinator, "last_stale_gatt_error"
             )
@@ -1876,6 +1899,7 @@ class RenogyAggregateHealthSensor(SensorEntity):
         all_devices: list[dict[str, Any]] = []
         status_counts = {
             "healthy": 0,
+            "recovering": 0,
             "warn": 0,
             "critical": 0,
             "disconnected": 0,
@@ -1926,6 +1950,9 @@ class RenogyAggregateHealthSensor(SensorEntity):
                 "stale_gatt_soft_failure_count": _coordinator_diagnostic_value(
                     coordinator, "stale_gatt_soft_failure_count", 0
                 ),
+                "last_stale_gatt_at": _coordinator_diagnostic_value(
+                    coordinator, "last_stale_gatt_at"
+                ),
                 "last_stale_gatt_error": _coordinator_diagnostic_value(
                     coordinator, "last_stale_gatt_error"
                 ),
@@ -1969,6 +1996,8 @@ class RenogyAggregateHealthSensor(SensorEntity):
             or status_counts.get("disconnected", 0) > 0
         ):
             aggregate_status = "critical"
+        elif status_counts.get("recovering", 0) > 0:
+            aggregate_status = "recovering"
         elif status_counts.get("warn", 0) > 0:
             aggregate_status = "warn"
         elif status_counts.get("healthy", 0) == total_devices:
@@ -1982,6 +2011,7 @@ class RenogyAggregateHealthSensor(SensorEntity):
             else None,
             "total_devices": total_devices,
             "healthy_devices": status_counts.get("healthy", 0),
+            "recovering_devices": status_counts.get("recovering", 0),
             "warn_devices": status_counts.get("warn", 0),
             "critical_devices": status_counts.get("critical", 0),
             "disconnected_devices": status_counts.get("disconnected", 0),

@@ -145,6 +145,7 @@ class RenogyActiveBluetoothCoordinator(
         self.startup_characteristic_suppressed_count = 0
         self.last_startup_characteristic_error: str | None = None
         self.stale_gatt_soft_failure_count = 0
+        self.last_stale_gatt_at: str | None = None
         self.last_stale_gatt_error: str | None = None
         self.ble_startup_warmup_seconds = BLE_STARTUP_WARMUP_SECONDS
         self.startup_warmup_until: str | None = (
@@ -190,6 +191,7 @@ class RenogyActiveBluetoothCoordinator(
         self._connection_in_progress = False
         self._startup_started_at = self._monotonic_time()
         self._last_read_soft_failure = False
+        self._last_stale_gatt_warning_at = 0.0
 
     def _monotonic_time(self) -> float | None:
         """Return the Home Assistant loop monotonic time when available."""
@@ -337,16 +339,22 @@ class RenogyActiveBluetoothCoordinator(
         """Preserve availability when BlueZ returns a stale GATT service table."""
         self._last_read_soft_failure = True
         self.stale_gatt_soft_failure_count += 1
+        self.last_stale_gatt_at = datetime.now().isoformat()
         self.last_stale_gatt_error = str(error) if error is not None else "unknown"
         self.last_poll_finished = datetime.now().isoformat()
         device.update_availability(True, None)
         self.last_update_success = True
-        self.logger.warning(
+        now = self._monotonic_time() or 0.0
+        should_warn = now <= 0.0 or now - self._last_stale_gatt_warning_at >= 300
+        log_method = self.logger.warning if should_warn else self.logger.debug
+        log_method(
             "Treating BLE characteristic lookup failure for %s as stale GATT data; "
-            "preserving existing availability and retrying on the next poll. Error: %s",
+            "preserving existing availability and retrying. Error: %s",
             device.address,
             error,
         )
+        if should_warn:
+            self._last_stale_gatt_warning_at = now
 
     async def _read_device_once(
         self, device: RenogyBLEDevice
@@ -882,6 +890,7 @@ class RenogyActiveBluetoothCoordinator(
                     else:
                         self._last_read_soft_failure = True
                         self.stale_gatt_soft_failure_count += 1
+                        self.last_stale_gatt_at = datetime.now().isoformat()
                         self.last_stale_gatt_error = str(err)
                         self.last_update_success = True
                 else:

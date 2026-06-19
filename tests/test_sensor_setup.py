@@ -7,6 +7,7 @@ import importlib
 import sys
 import types
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -669,6 +670,72 @@ def test_aggregate_health_sensor_rollup() -> None:
     )
 
 
+def test_aggregate_health_sensor_reports_stale_gatt_recovering() -> None:
+    """Ensure aggregate health reports a recent stale-GATT recovery window."""
+    sensor_module = _load_sensor_module()
+
+    hass = MagicMock()
+    hass.data = {sensor_module.DOMAIN: {}}
+
+    coordinator = MagicMock()
+    coordinator.address = "AA:BB:CC:DD:EE:01"
+    coordinator.last_update_success = True
+    coordinator.warn_rssi = -80
+    coordinator.critical_rssi = -90
+    coordinator.last_stale_gatt_at = datetime.now().isoformat()
+    device = MagicMock()
+    device.name = "Renogy Recovering"
+    device.address = coordinator.address
+    device.device_type = sensor_module.DeviceType.CONTROLLER.value
+    device.is_available = True
+    device.rssi = -60
+    coordinator.device = device
+
+    hass.data[sensor_module.DOMAIN]["entry-1"] = {
+        "coordinator": coordinator,
+        "devices": [device],
+    }
+
+    entity = sensor_module.RenogyAggregateHealthSensor(hass)
+    entity._handle_update()
+
+    assert entity.native_value == "recovering"
+    attrs = entity.extra_state_attributes
+    assert attrs["recovering_devices"] == 1
+    assert attrs["critical_devices"] == 0
+    assert any(
+        failing["name"] == "Renogy Recovering" and failing["status"] == "recovering"
+        for failing in attrs["failing_devices"]
+    )
+
+
+def test_health_status_reports_recent_stale_gatt_recovery_window() -> None:
+    """Ensure stale-GATT soft failures recover briefly without hiding hard failures."""
+    sensor_module = _load_sensor_module()
+
+    coordinator = MagicMock()
+    coordinator.last_update_success = True
+    coordinator.warn_rssi = -80
+    coordinator.critical_rssi = -90
+    coordinator.last_stale_gatt_at = datetime.now().isoformat()
+
+    device = MagicMock()
+    device.is_available = True
+    device.rssi = -95
+
+    assert sensor_module._compute_health_status(coordinator, device) == "recovering"
+
+    coordinator.last_stale_gatt_at = (
+        datetime.now()
+        - timedelta(seconds=sensor_module.STALE_GATT_RECOVERING_SECONDS + 1)
+    ).isoformat()
+    assert sensor_module._compute_health_status(coordinator, device) == "critical"
+
+    coordinator.last_update_success = False
+    coordinator.last_stale_gatt_at = datetime.now().isoformat()
+    assert sensor_module._compute_health_status(coordinator, device) == "disconnected"
+
+
 def test_rssi_trend_computation() -> None:
     """Ensure RSSI trend calculations are stable/improving/declining."""
     sensor_module = _load_sensor_module()
@@ -737,6 +804,7 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
         "Characteristic 0000fff1 was not found!"
     )
     coordinator.stale_gatt_soft_failure_count = 3
+    coordinator.last_stale_gatt_at = "2026-06-17T18:04:00"
     coordinator.last_stale_gatt_error = "Characteristic 0000fff1 was not found!"
     coordinator.characteristic_not_found_count = 2
     coordinator.characteristic_retry_count = 2
@@ -783,6 +851,7 @@ def test_health_sensor_exposes_ble_diagnostics() -> None:
         == "Characteristic 0000fff1 was not found!"
     )
     assert attrs["stale_gatt_soft_failure_count"] == 3
+    assert attrs["last_stale_gatt_at"] == "2026-06-17T18:04:00"
     assert attrs["last_stale_gatt_error"] == "Characteristic 0000fff1 was not found!"
     assert attrs["characteristic_not_found_count"] == 2
     assert attrs["characteristic_retry_count"] == 2
